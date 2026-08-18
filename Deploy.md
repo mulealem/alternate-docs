@@ -19,11 +19,12 @@ just point Coolify at the repo and set Port to 8080.
 This is the simplest deploy. The repo ships a `Dockerfile` that does
 everything:
 
-- Builder stage: `node:22-alpine`, installs `package-lock.json` exactly
-  with `npm install`, runs `npm run build` (Docusaurus emits the static
-  site to `build/`).
+- Builder stage: `node:22-alpine`, installs dependencies with
+  `npm ci` (falls back to `npm install` if the lockfile ever drifts),
+  runs `npm run build` (Docusaurus emits the static site to `build/`).
 - Runner stage: `nginx:alpine`, copies `build/` into nginx's html root,
-  applies a tiny `nginx.conf` that listens on port 8080.
+  applies a tiny `nginx.conf` that listens on **both 80 and 8080** (so
+  the Coolify "Port" field can be either value).
 - Healthcheck: `wget --spider http://127.0.0.1:8080/` every 30s.
 
 ### Coolify UI steps
@@ -37,7 +38,7 @@ everything:
    | Git Repository | `https://github.com/mulealem/alternate-docs.git` |
    | Branch | `main` |
    | **Build Pack** | `Dockerfile` (NOT `Docker Compose`, NOT `Nixpacks`) |
-   | **Port** | `8080` |
+   | **Port** | `80` or `8080` — both work; the image's nginx listens on both |
    | **Healthcheck Path** | `/` |
    | **Domain** | `alt-docs.payment.et` |
 
