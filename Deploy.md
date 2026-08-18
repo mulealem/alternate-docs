@@ -13,27 +13,36 @@ Built as a fully static export to `build/`.
 
 ## Recommended: Coolify **Static Site** resource (no container)
 
-This is the lightest deployment. Coolify runs `npm run build` and
-serves the resulting `build/` directory directly — no Node runtime, no
-nginx, no container, no compose layer.
+This is the lightest deployment. Coolify runs the install + build
+step and serves the resulting `build/` directory directly — no Node
+runtime, no nginx, no container, no compose layer.
 
-| Field | Value |
+### Where the fields live in Coolify v4
+
+When you click **+ New → Static Site**, the form has several tabs.
+You'll use the **General** tab.
+
+| UI field (General tab) | Value |
 |---|---|
 | Resource type | **Static Site** |
-| Git repo | `https://github.com/mulealem/alternate-docs.git` |
-| Branch | `main` |
-| **Base Directory** | `/` (the repo root — Docusaurus lives here, not in a sub-folder) |
-| **Build Command** | `npm install && npm run build` |
+| Git Repository | `https://github.com/mulealem/alternate-docs.git` |
+| Git Branch | `main` |
+| **Install Command** | `npm install` |
+| **Build Command** | `npm run build` |
 | **Publish Directory** | `build` |
-| **Node version** | 22 |
-| **Domain** | `alt-docs.payment.et` |
+| **Port** | leave blank (Static Sites don't expose a port) |
+| **Domain** | `alt-docs.payment.et` (in the **Domains** tab, not General) |
+| Build Arguments | leave empty (no env vars needed for v1) |
 
-No environment variables are required by default. The Docusaurus
-`url` is hardcoded to `https://alt-docs.payment.et` in
-`docusaurus.config.ts`. If you ever serve from a different domain,
-change `url` (and, if needed, `baseUrl`) in `docusaurus.config.ts`
-and commit before the next deploy — Docusaurus bakes these into
-absolute URLs at build time.
+If your Coolify build is older and the form only shows Git
+Repository / Branch / **Publish Directory** (no Build Command
+field), see "Older Coolify versions" below — Coolify will auto-detect
+`npm run build` from `package.json` in that case.
+
+**Base Directory / Build Path:** the Static Site form does not have
+this field in v4 — it always builds from the repo root. If you see
+one anyway, set it to `/` (Docusaurus sits at the repo root, not in a
+sub-folder).
 
 ### First deploy
 
@@ -42,6 +51,33 @@ absolute URLs at build time.
    `build/` from a CDN-friendly origin.
 3. Visit `https://alt-docs.payment.et` — you should see the PyGate
    alternate docs.
+
+### Older Coolify versions (auto-detect mode)
+
+If your Coolify build doesn't show an Install/Build Command field at
+all, it infers them from `package.json` scripts:
+
+- `npm install` — Coolify detects this as the install step.
+- `npm run build` — this is the `build` script in
+  `alternate-docs/package.json` (`"build": "docusaurus build"`).
+
+The only field you can change in that mode is **Publish Directory**:
+set it to `build`. Everything else Just Works.
+
+### If you picked "Application" by mistake
+
+Application uses a Dockerfile / docker-compose and does NOT have
+Install/Build/Publish fields — it only has Build Path, Port, and
+Healthcheck Path. **Delete the Application and re-add it as a Static
+Site.** This site is designed for Static Site (no Dockerfile needed
+for the happy path).
+
+No environment variables are required by default. The Docusaurus
+`url` is hardcoded to `https://alt-docs.payment.et` in
+`docusaurus.config.ts`. If you ever serve from a different domain,
+change `url` (and, if needed, `baseUrl`) in `docusaurus.config.ts`
+and commit before the next deploy — Docusaurus bakes these into
+absolute URLs at build time.
 
 ## Alternative: containerised (kept for parity)
 
