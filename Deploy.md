@@ -5,98 +5,111 @@ as a sibling of [`doc/`](../doc). It exists as a redundancy layer while
 the primary `docs.payment.et` (a Fumadocs + Next.js site in [`doc/`](../doc))
 is being repaired, and as a fallback for the future.
 
-Built as a fully static export to `build/`.
+Deployed as a **Coolify Application** — a single `Dockerfile` does the
+entire build (npm install + Docusaurus build) and serves the static
+export via nginx. **No Build Command field needed in the Coolify UI**;
+just point Coolify at the repo and set Port to 8080.
 
 ## Public URL
 
 `https://alt-docs.payment.et`
 
-## Recommended: Coolify **Static Site** resource (no container)
+## Deploy: Coolify **Application** (Dockerfile) — recommended
 
-This is the lightest deployment. Coolify runs the install + build
-step and serves the resulting `build/` directory directly — no Node
-runtime, no nginx, no container, no compose layer.
+This is the simplest deploy. The repo ships a `Dockerfile` that does
+everything:
 
-### Where the fields live in Coolify v4
+- Builder stage: `node:22-alpine`, installs `package-lock.json` exactly
+  with `npm install`, runs `npm run build` (Docusaurus emits the static
+  site to `build/`).
+- Runner stage: `nginx:alpine`, copies `build/` into nginx's html root,
+  applies a tiny `nginx.conf` that listens on port 8080.
+- Healthcheck: `wget --spider http://127.0.0.1:8080/` every 30s.
 
-When you click **+ New → Static Site**, the form has several tabs.
-You'll use the **General** tab.
+### Coolify UI steps
 
-| UI field (General tab) | Value |
-|---|---|
-| Resource type | **Static Site** |
-| Git Repository | `https://github.com/mulealem/alternate-docs.git` |
-| Git Branch | `main` |
-| **Install Command** | `npm install` |
-| **Build Command** | `npm run build` |
-| **Publish Directory** | `build` |
-| **Port** | leave blank (Static Sites don't expose a port) |
-| **Domain** | `alt-docs.payment.et` (in the **Domains** tab, not General) |
-| Build Arguments | leave empty (no env vars needed for v1) |
+1. **Add Resource → Application** (Public).
+2. Fill in:
 
-If your Coolify build is older and the form only shows Git
-Repository / Branch / **Publish Directory** (no Build Command
-field), see "Older Coolify versions" below — Coolify will auto-detect
-`npm run build` from `package.json` in that case.
+   | Field | Value |
+   |---|---|
+   | Resource type | **Application** |
+   | Git Repository | `https://github.com/mulealem/alternate-docs.git` |
+   | Branch | `main` |
+   | **Build Pack** | `Dockerfile` (NOT `Docker Compose`, NOT `Nixpacks`) |
+   | **Port** | `8080` |
+   | **Healthcheck Path** | `/` |
+   | **Domain** | `alt-docs.payment.et` |
 
-**Base Directory / Build Path:** the Static Site form does not have
-this field in v4 — it always builds from the repo root. If you see
-one anyway, set it to `/` (Docusaurus sits at the repo root, not in a
-sub-folder).
+   That's the entire config — no Install Command, no Build Command, no
+   Publish Directory, no Base Directory. The Dockerfile handles all of
+   it.
 
-### First deploy
+3. Click **Deploy**. Coolify will build the image (≈3–4 min on first
+   run, faster with BuildKit cache), start the container, and serve
+   the static export on `https://alt-docs.payment.et`.
 
-1. Add the **Static Site** resource with the values above.
-2. Deploy. Coolify will run `npm install && npm run build` and serve
-   `build/` from a CDN-friendly origin.
-3. Visit `https://alt-docs.payment.et` — you should see the PyGate
-   alternate docs.
+### Why this works when Static Site UI fields are missing
 
-### Older Coolify versions (auto-detect mode)
+Coolify's Application flow only ever needs four fields: Git repo,
+Build Pack (Dockerfile vs Compose vs Nixpacks), Port, and Healthcheck.
+No extra text boxes to fill in, no UI surprises. The Dockerfile
+literally `RUN npm install && npm run build` during the image build,
+so the static export is **baked into the image** — Coolify never has
+to run a build step at request time, and the runtime container is
+just nginx serving files.
 
-If your Coolify build doesn't show an Install/Build Command field at
-all, it infers them from `package.json` scripts:
+### Verify after deploy
 
-- `npm install` — Coolify detects this as the install step.
-- `npm run build` — this is the `build` script in
-  `alternate-docs/package.json` (`"build": "docusaurus build"`).
+```bash
+curl -sS -I --max-time 10 https://alt-docs.payment.et/
+# → expect: HTTP/1.1 200 OK
+# → expect body: real HTML with <title>PyGate Docs</title>
 
-The only field you can change in that mode is **Publish Directory**:
-set it to `build`. Everything else Just Works.
+curl -sS --max-time 10 https://alt-docs.payment.et/quickstart/
+# → expect: 200 OK with the Quickstart page
 
-### If you picked "Application" by mistake
+docker logs <container-id> 2>&1 | tail -20
+# → expect: "GET / HTTP/1.1 200" lines from nginx access log
+```
 
-Application uses a Dockerfile / docker-compose and does NOT have
-Install/Build/Publish fields — it only has Build Path, Port, and
-Healthcheck Path. **Delete the Application and re-add it as a Static
-Site.** This site is designed for Static Site (no Dockerfile needed
-for the happy path).
+## Why we ship a Dockerfile (and not a Static Site resource)
 
-No environment variables are required by default. The Docusaurus
-`url` is hardcoded to `https://alt-docs.payment.et` in
-`docusaurus.config.ts`. If you ever serve from a different domain,
-change `url` (and, if needed, `baseUrl`) in `docusaurus.config.ts`
-and commit before the next deploy — Docusaurus bakes these into
-absolute URLs at build time.
+Coolify's **Static Site** UI on v4.x exposes the build step through
+separate **Install Command** and **Build Command** text fields. If
+your Coolify build doesn't surface those fields (some v4 versions hide
+them), the Static Site form becomes unusable because there's no place
+to tell Coolify to run `npm install && npm run build` before
+publishing `build/`.
 
-## Alternative: containerised (kept for parity)
+Shipping a Dockerfile makes the entire build a property of the **image**
+Coolify builds — no UI text fields involved. The container that boots
+is nginx serving `build/`, which is exactly what Static Site would
+have done anyway, with one extra container.
 
-If you must deploy via the **Application** resource type, this folder
-also contains a Dockerfile that builds the same static export (`build/`)
-and serves it with nginx on port 8080. Coolify config would be:
+The trade-off is: one container + one TLS hop instead of a CDN-friendly
+origin. For an internal-ish docs fallback at low traffic, this is
+fine. If you ever want to switch to a Static Site, the same repo will
+work — see "Migrating to a Static Site later" below.
+
+## Migrating to a Static Site later
+
+If/when a Coolify version exposes the Build Command field again (or
+you move to a Coolify instance that does), this same repo can be
+re-deployed as a Static Site with these fields:
 
 | Field | Value |
 |---|---|
-| Resource type | **Application** (Public) |
-| **Build Path** | `/` (repo root) |
-| **Port** | `8080` |
-| **Healthcheck path** | `/` |
+| Resource type | **Static Site** |
+| Git Repository | `https://github.com/mulealem/alternate-docs.git` |
+| Branch | `main` |
+| **Install Command** | `npm install` |
+| **Build Command** | `npm run build` |
+| **Publish Directory** | `build` |
 | **Domain** | `alt-docs.payment.et` |
 
-> Static Site is preferred: it skips the Node runtime, removes one
-> container, and gets you a CDN-friendly origin. It also avoids the
-> `COOLIFY_URL` injection class of bugs that has historically broken
-> containerised static sites on this Coolify instance.
+The `Dockerfile` and `docker-compose.yml` can stay in the repo (they're
+harmless); the Static Site deployment simply ignores them.
 
 ## Local development
 
@@ -104,17 +117,18 @@ and serves it with nginx on port 8080. Coolify config would be:
 npm install
 npm run dev          # http://localhost:3003
 npm run build        # static export to ./build/
-npm run serve        # serve the built site on http://localhost:3003
+docker build -t alternate-docs-test .  # build the production image
+docker run --rm -p 8080:8080 alternate-docs-test   # serve on http://localhost:8080
 ```
 
 Node 22 required (matches `Dockerfile` base).
 
 ## Roll-forward
 
-- Documentation updates are pure content. Push to the repo, redeploy.
-- `package.json` declares `@docusaurus/*@^3.8.0` — Docusaurus 3 is the
-  current LTS line. Bumping to Docusaurus 4 (when available) is a
-  separate effort.
+- Documentation updates are pure content. Push to the repo, redeploy
+  (Application redeploys re-pull + rebuild the image; ~1 min cold).
+- Bumping Docusaurus: see Docusaurus 3 release notes; the Dockerfile
+  needs no changes for minor version bumps.
 
 ## Why this site exists
 
